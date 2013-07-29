@@ -14,22 +14,20 @@ import static java.lang.System.exit;
  *
  * @author Maxim Khodanovich
  * @version 21.01.13 17:16
- *
- *id is composed of:
- *time - 41 bits (millisecond precision w/ a custom epoch gives us 69 years)
- *configured machine id - 10 bits - gives us up to 1024 machines
- *sequence number - 12 bits - rolls over every 4096 per machine (with protection to avoid rollover in the same ms)
- *
+ *          <p/>
+ *          id is composed of:
+ *          time - 41 bits (millisecond precision w/ a custom epoch gives us 69 years)
+ *          configured machine id - 10 bits - gives us up to 1024 machines
+ *          sequence number - 12 bits - rolls over every 4096 per machine (with protection to avoid rollover in the same ms)
  */
 public class BasicEntityIdGenerator implements EntityIdGenerator {
-
     private final long datacenterIdBits = 10L;
     private final long maxDatacenterId = -1L ^ (-1L << datacenterIdBits);
-    private final long timestampBits = 41L;
 
-    private final long datacenterIdShift = 64L-datacenterIdBits;
-    private final long timestampLeftShift = 64L-datacenterIdBits-timestampBits;
-    private final long sequenceMax = 4096;
+    private final long sequenceBits = 12L;
+    private final long datacenterIdShift = sequenceBits;
+    private final long timestampLeftShift = sequenceBits + datacenterIdBits;
+    private final long sequenceMask = -1L ^ (-1L << sequenceBits);
     private final long twepoch = 1288834974657L;
     private final long datacenterId;
 
@@ -37,22 +35,24 @@ public class BasicEntityIdGenerator implements EntityIdGenerator {
     private volatile long sequence = 0L;
 
 
-    public BasicEntityIdGenerator() throws GetHardwareIdFailedException {
-        datacenterId  = getDatacenterId();
-        if (datacenterId > maxDatacenterId || datacenterId < 0){
+    public BasicEntityIdGenerator() throws
+                                    GetHardwareIdFailedException {
+        datacenterId = getDatacenterId();
+        if (datacenterId > maxDatacenterId || datacenterId < 0) {
             throw new GetHardwareIdFailedException("datacenterId > maxDatacenterId");
         }
     }
 
     @Override
-    public synchronized String generateLongId() throws InvalidSystemClockException {
+    public synchronized String generateLongId() throws
+                                                InvalidSystemClockException {
         long timestamp = System.currentTimeMillis();
-        if(timestamp<lastTimestamp){
-            throw new InvalidSystemClockException("Clock moved backwards.  Refusing to generate id for "+ (
-                    lastTimestamp - timestamp) +" milliseconds.");
+        if (timestamp < lastTimestamp) {
+            throw new InvalidSystemClockException("Clock moved backwards.  Refusing to generate id for " + (
+                    lastTimestamp - timestamp) + " milliseconds.");
         }
         if (lastTimestamp == timestamp) {
-            sequence = (sequence + 1) % sequenceMax;
+            sequence = (sequence + 1) & sequenceMask;
             if (sequence == 0) {
                 timestamp = tilNextMillis(lastTimestamp);
             }
@@ -61,12 +61,12 @@ public class BasicEntityIdGenerator implements EntityIdGenerator {
         }
         lastTimestamp = timestamp;
         Long id = ((timestamp - twepoch) << timestampLeftShift) |
-                  (datacenterId << datacenterIdShift) |
-                  sequence;
+                (datacenterId << datacenterIdShift) |
+                sequence;
         return id.toString();
     }
 
-    protected long tilNextMillis(long lastTimestamp){
+    protected long tilNextMillis(long lastTimestamp) {
         long timestamp = System.currentTimeMillis();
         while (timestamp <= lastTimestamp) {
             timestamp = System.currentTimeMillis();
@@ -74,15 +74,15 @@ public class BasicEntityIdGenerator implements EntityIdGenerator {
         return timestamp;
     }
 
-    protected long getDatacenterId() throws GetHardwareIdFailedException {
-        try{
+    protected long getDatacenterId() throws
+                                     GetHardwareIdFailedException {
+        try {
             InetAddress ip = InetAddress.getLocalHost();
             NetworkInterface network = NetworkInterface.getByInetAddress(ip);
             byte[] mac = network.getHardwareAddress();
             //System.out.println(DatatypeConverter.printHexBinary(mac));
-            long id = ((0x000000FF & (long)mac[mac.length-1]) | (0x0000FF00 & (((long)mac[mac.length-2])<<8)))>>6;
             //System.out.println(id);
-            return id;
+            return ((0x000000FF & (long) mac[mac.length - 1]) | (0x0000FF00 & (((long) mac[mac.length - 2]) << 8))) >> 6;
         } catch (SocketException e) {
             throw new GetHardwareIdFailedException(e);
         } catch (UnknownHostException e) {
@@ -90,14 +90,16 @@ public class BasicEntityIdGenerator implements EntityIdGenerator {
         }
     }
 
-    public static void main(String[] args) throws GetHardwareIdFailedException, InvalidSystemClockException {
+    public static void main(String[] args) throws
+                                           GetHardwareIdFailedException,
+                                           InvalidSystemClockException {
         BasicEntityIdGenerator generator = new BasicEntityIdGenerator();
-        int n = Integer.parseInt(args[0]);
-        Set<String> ids =new HashSet<String>();
-        for(int i=0; i<n; i++) {
-           String id = generator.generateLongId();
-           if(ids.contains(id)){
-                System.out.println("Duplicate id:"+id);
+        int n = 100;
+        Set<String> ids = new HashSet<String>();
+        for (int i = 0; i < n; i++) {
+            String id = generator.generateLongId();
+            if (ids.contains(id)) {
+                System.out.println("Duplicate id:" + id);
                 exit(1);
             }
             ids.add(id);
